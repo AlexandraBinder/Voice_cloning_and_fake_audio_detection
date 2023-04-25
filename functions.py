@@ -13,6 +13,7 @@ import numpy as np
 import soundfile as sf
 import torch
 from sphfile import SPHFile
+from jiwer import wer
 
 from encoder import inference as encoder
 from encoder.params_model import model_embedding_size as speaker_embedding_size
@@ -50,7 +51,7 @@ def convert_audiofiles(root_path):
             
         if root == root_path: break
 
-def organize_audio_files(root_path, new_directory):
+def organize_audio_files(root_path, new_wav_folder, new_txt_folder):
     """
     Copies .wav files stored in root_path and organizes them into a new directory.
 
@@ -63,7 +64,11 @@ def organize_audio_files(root_path, new_directory):
             _, file_extension = os.path.splitext(file)
             if file_extension == '.wav':
                 src = os.path.join(root, file)
-                dst = os.path.join(new_directory, '_'.join([aux, file]))
+                dst = os.path.join(new_wav_folder, '_'.join([aux, file]))
+                shutil.copyfile(src, dst)
+            elif file_extension == '.TXT':
+                src = os.path.join(root, file)
+                dst = os.path.join(new_txt_folder, '_'.join([aux, file]))
                 shutil.copyfile(src, dst)
         if root == root_path: break
 
@@ -85,43 +90,10 @@ def check_cuda():
     else:
         print("Using CPU for inference.\n")
 
-def wer(reference, hypothesis):
-    """
-    Calculates the Word Error Rate (WER) between two sentences.
-
-    :param r: reference sentence
-    :param h: hypothesis sentence
-    :return: the WER between the reference and hypothesis sentences
-    """
-    # split sentences into words
-    reference = reference.split()
-    hypothesis = hypothesis.split()
-
-    # create a matrix with the size of (len(r)+1)x(len(h)+1)
-    matrix = np.zeros((len(reference)+1)*(len(hypothesis)+1), dtype=np.uint16)
-    matrix = matrix.reshape((len(reference)+1, len(hypothesis)+1))
-
-    # initialize the first row and column of the matrix
-    for i in range(len(reference)+1):
-        for j in range(len(hypothesis)+1):
-            if i == 0:
-                matrix[0][j] = j
-            elif j == 0:
-                matrix[i][0] = i
-
-    # fill the matrix
-    for i in range(1, len(reference)+1):
-        for j in range(1, len(hypothesis)+1):
-            if r[i-1] == hypothesis[j-1]:
-                matrix[i][j] = matrix[i-1][j-1]
-            else:
-                substitution = matrix[i-1][j-1] + 1
-                insertion = matrix[i][j-1] + 1
-                deletion = matrix[i-1][j] + 1
-                matrix[i][j] = min(substitution, insertion, deletion)
-
-    # the WER is the last element of the matrix
-    return matrix[len(reference)][len(hypothesis)]/len(reference)
+def get_original_text(file):
+    with open(file, 'r') as f:
+        data = f.read()
+    return ' '.join(data.split(' ')[2:])
 
 def voice_to_text(voice):
     """
@@ -174,7 +146,7 @@ def text_to_voice(sample_voice, audio_text, dest_path):
     except Exception as e:
         print("Caught Exception: %s" % repr(e))
 
-def voice_cloning(src_audio, sample_voice, dst_audio):
+def voice_cloning(src_audio, src_text_file, sample_voice, dst_audio):
     """
     Clones the voice of a given audio file. 
     First it transcribes a source audio into text and then it generates a 
@@ -186,7 +158,10 @@ def voice_cloning(src_audio, sample_voice, dst_audio):
     :param dst_audio: path to where the fake audio file will be stored.
     """
     text = voice_to_text(src_audio)
+    src_text = get_original_text(src_text_file)
+    word_error_rate = wer(reference=src_text, hypothesis=text)
     text_to_voice(sample_voice, text, dst_audio)
+    return word_error_rate
 
 def calculate_MFCCs_and_labels(files_path, y_value):
     """
