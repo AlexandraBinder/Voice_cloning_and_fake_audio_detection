@@ -21,6 +21,9 @@ from utils.argutils import print_args
 from utils.default_models import ensure_default_models
 from vocoder import inference as vocoder
 
+from sklearn.model_selection import train_test_split
+# from keras.utils import to_categorical
+
 def convert_audiofiles(root_path):
     """
     Converts .WAV files with NIST_1 headers into .wav files with RIFF headers
@@ -68,7 +71,6 @@ def check_cuda():
     """
     Checks CUDA CPU and or GPU information
     """
-    new_directory
     if torch.cuda.is_available():
         device_id = torch.cuda.current_device()
         gpu_properties = torch.cuda.get_device_properties(device_id)
@@ -82,8 +84,6 @@ def check_cuda():
             gpu_properties.total_memory / 1e9))
     else:
         print("Using CPU for inference.\n")
-
-import numpy as np
 
 def wer(reference, hypothesis):
     """
@@ -187,3 +187,48 @@ def voice_cloning(src_audio, sample_voice, dst_audio):
     """
     text = voice_to_text(src_audio)
     text_to_voice(sample_voice, text, dst_audio)
+
+def calculate_MFCCs_and_labels(files_path, y_value):
+    """
+    Calculates the Mel-frequency cepstral coefficients (MFCCs) of the 
+    audio files stored in the files_path and then pads the resulting 
+    MFCC matrix with zeros to have a fixed shape of (n, 40). 
+    It then return the padded MFCC matrices and the correspondig labels 
+    (0 for original, 1 for fake)
+
+    :param files_path: path to audio files
+    :y_value: label value to return
+    :return: returns a list X of the padded MFCC matrices and a list y of their corresponding labels
+    """
+    file_path, X, y = [], [], []
+    for file in os.listdir(files_path):
+        wav, _ = librosa.load(os.path.join(files_path , file))
+        mfcc = librosa.feature.mfcc(wav)
+        padded_mfcc = pad2d(mfcc, 40)
+        file_path.append(file)
+        X.append(padded_mfcc)
+        y.append(y_value)
+    return file_path, X, y
+
+def pad2d(mfcc, i):
+    """
+    Pads a MFCC matrix with zeros to have a fixed shape of (1, i). 
+
+    :param files_path: path to audio files
+    :y_value: label value to return
+    :return: returns a padded MFCC matrix
+    """
+    if mfcc.shape[1] > i: return mfcc[:, 0: i]
+    else: return np.hstack((mfcc, np.zeros((mfcc.shape[0], i - mfcc.shape[1]))))
+
+def get_train_test_split(X, y, test_size, val_size):
+    X_train, X_test, y_train, y_test = train_test_split(X, y, stratify=y, test_size=test_size, shuffle=True, random_state=42)
+    X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, stratify=y_train, test_size=val_size, random_state=42)
+    
+    X_train, X_val, X_test, y_train, y_val, y_test = map(np.array, [X_train, X_val, X_test, y_train, y_val, y_test])
+
+    X_train = np.expand_dims(X_train, -1)
+    X_val = np.expand_dims(X_val, -1)
+    X_test = np.expand_dims(X_test, -1)
+
+    return X_train, X_val, X_test, y_train, y_val, y_test
